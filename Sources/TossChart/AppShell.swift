@@ -1343,7 +1343,6 @@ struct MarketView: View {
                             selectedSector: $selectedSector
                         ) { symbol in
                             session.selectedSymbol = symbol
-                            Task { await session.refreshMarketData() }
                         }
                     } else {
                         MarketRankingSummary(
@@ -1358,7 +1357,6 @@ struct MarketView: View {
                             sourceText: session.marketActivitySourceText
                         ) { symbol in
                             session.selectedSymbol = symbol
-                            Task { await session.refreshMarketData() }
                         }
                     }
                 }
@@ -1391,13 +1389,6 @@ private struct SectorMarketOverview: View {
 
     private var summaries: [SectorSummary] {
         sectorSummaries(from: rows)
-    }
-
-    private var filteredRows: [MarketActivitySnapshot] {
-        let scoped = selectedSector == .all
-            ? rows
-            : rows.filter { marketSector(for: $0) == selectedSector }
-        return Array(scoped.prefix(90))
     }
 
     private var leadingSector: SectorSummary? {
@@ -1444,12 +1435,12 @@ private struct SectorMarketOverview: View {
             SectorStrip(summaries: summaries, selectedSector: $selectedSector)
 
             SectorHeatmapPanel(
-                rows: filteredRows,
+                rows: rows,
                 selectedSector: selectedSector,
                 onSelect: onSelect
             )
 
-            Text("빨강은 상승, 파랑은 하락입니다. 섹터 평균은 등락률이 있는 종목을 거래대금으로 가중해 계산합니다.")
+            Text("빨강은 상승, 파랑은 하락입니다. 전체 보기에서는 섹터 박스 안에 종목 박스를 넣어 업종 흐름을 한눈에 봅니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1551,32 +1542,45 @@ private struct SectorHeatmapPanel: View {
     let selectedSector: MarketSector
     let onSelect: (String) -> Void
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 150), spacing: 10)
-    ]
+    private var summaries: [SectorSummary] {
+        sectorSummaries(from: rows)
+    }
+
+    private var displayedSummaries: [SectorSummary] {
+        if selectedSector == .all {
+            return summaries
+        }
+        return summaries.filter { $0.sector == selectedSector }
+    }
+
+    private var columns: [GridItem] {
+        [
+            GridItem(.adaptive(minimum: selectedSector == .all ? 330 : 520), spacing: 12)
+        ]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("\(selectedSector.title) 히트맵", systemImage: "square.grid.3x3.fill")
+                Label(selectedSector == .all ? "섹터별 주식 히트맵" : "\(selectedSector.title) 히트맵", systemImage: "square.grid.3x3.fill")
                     .font(.headline)
                 Spacer()
-                Text("\(rows.count)개")
+                Text("\(displayedSummaries.reduce(0) { $0 + $1.rows.count })개")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if rows.isEmpty {
+            if displayedSummaries.isEmpty {
                 ContentUnavailableView("표시할 섹터 데이터가 없습니다", systemImage: "square.grid.3x3")
                     .frame(maxWidth: .infinity, minHeight: 260)
             } else {
                 LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(rows, id: \.id) { row in
-                        SectorHeatmapTile(row: row)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onSelect(row.symbol)
-                            }
+                    ForEach(displayedSummaries) { summary in
+                        SectorHeatmapGroup(
+                            summary: summary,
+                            isExpanded: selectedSector != .all,
+                            onSelect: onSelect
+                        )
                     }
                 }
             }
@@ -1586,50 +1590,124 @@ private struct SectorHeatmapPanel: View {
     }
 }
 
-private struct SectorHeatmapTile: View {
-    let row: MarketActivitySnapshot
+private struct SectorHeatmapGroup: View {
+    let summary: SectorSummary
+    let isExpanded: Bool
+    let onSelect: (String) -> Void
+
+    private var stockRows: [MarketActivitySnapshot] {
+        Array(summary.rows.prefix(isExpanded ? 44 : 18))
+    }
+
+    private var featuredRows: [MarketActivitySnapshot] {
+        Array(stockRows.prefix(isExpanded ? 3 : 2))
+    }
+
+    private var compactRows: [MarketActivitySnapshot] {
+        Array(stockRows.dropFirst(featuredRows.count))
+    }
+
+    private var miniColumns: [GridItem] {
+        [
+            GridItem(.adaptive(minimum: isExpanded ? 104 : 82), spacing: 5)
+        ]
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.name)
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                    Text(row.symbol)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.white.opacity(0.78))
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label(summary.sector.title, systemImage: summary.sector.systemImage)
+                    .font(.headline)
                 Spacer()
-                Image(systemName: sector.systemImage)
+                Text(changeLabel)
+                    .font(.callout.monospacedDigit().weight(.bold))
+                    .foregroundStyle(sectorColor(summary.averageChange))
+                Text("\(summary.rows.count)개")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 4)
+            if !featuredRows.isEmpty {
+                HStack(spacing: 5) {
+                    ForEach(featuredRows, id: \.id) { row in
+                        Button {
+                            onSelect(row.symbol)
+                        } label: {
+                            SectorStockHeatTile(row: row, isFeatured: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
 
-            HStack(alignment: .bottom) {
+            if !compactRows.isEmpty {
+                LazyVGrid(columns: miniColumns, spacing: 5) {
+                    ForEach(compactRows, id: \.id) { row in
+                        Button {
+                            onSelect(row.symbol)
+                        } label: {
+                            SectorStockHeatTile(row: row, isFeatured: false)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(sectorColor(summary.averageChange).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(sectorColor(summary.averageChange).opacity(0.30), lineWidth: 1)
+        )
+    }
+
+    private var changeLabel: String {
+        guard let change = summary.averageChange else {
+            return "-"
+        }
+        return "\(change >= 0 ? "+" : "")\(formattedDouble(change, fractionDigits: 2))%"
+    }
+}
+
+private struct SectorStockHeatTile: View {
+    let row: MarketActivitySnapshot
+    let isFeatured: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isFeatured ? 8 : 4) {
+            Text(row.name)
+                .font(isFeatured ? .title3.weight(.bold) : .caption.weight(.semibold))
+                .lineLimit(isFeatured ? 2 : 1)
+                .minimumScaleFactor(0.72)
+            Text(row.symbol)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.white.opacity(0.78))
+            Spacer(minLength: 4)
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(changeLabel)
-                    .font(.title3.monospacedDigit().weight(.bold))
+                    .font(isFeatured ? .title3.monospacedDigit().weight(.bold) : .caption.monospacedDigit().weight(.bold))
                 Spacer()
-                Text(tradeValueText)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.78))
+                if isFeatured {
+                    Text(priceText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.78))
+                }
             }
         }
         .foregroundStyle(.white)
-        .padding(12)
-        .frame(height: 112)
+        .padding(isFeatured ? 12 : 8)
+        .frame(maxWidth: .infinity, minHeight: isFeatured ? 118 : 72, alignment: .topLeading)
         .background(tileColor, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var sector: MarketSector {
-        marketSector(for: row)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
     }
 
     private var tileColor: Color {
         let base = sectorColor(row.changePercent)
-        let intensity = min(0.95, max(0.32, abs(row.changePercent ?? 0) / 6 + 0.32))
+        let intensity = min(0.95, max(0.34, abs(row.changePercent ?? 0) / 7 + 0.34))
         return base.opacity(intensity)
     }
 
@@ -1640,8 +1718,8 @@ private struct SectorHeatmapTile: View {
         return "\(change >= 0 ? "+" : "")\(formattedDouble(change, fractionDigits: 2))%"
     }
 
-    private var tradeValueText: String {
-        row.tradeValue.map { compactDecimal($0, fractionDigits: 1) } ?? "-"
+    private var priceText: String {
+        "\(row.currency) \(row.lastPrice)"
     }
 }
 
@@ -1835,6 +1913,10 @@ struct MarketRankingPanel: View {
     let sourceText: String
     let onSelect: (String) -> Void
 
+    private var visibleRows: [MarketActivitySnapshot] {
+        Array(rows.prefix(300))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -1851,22 +1933,28 @@ struct MarketRankingPanel: View {
 
             Divider()
 
-            if rows.isEmpty {
+            if visibleRows.isEmpty {
                 ContentUnavailableView("표시할 종목이 없습니다", systemImage: "chart.bar")
                     .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 LazyVStack(spacing: 0) {
                     MarketRankingHeader(metric: metric)
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(visibleRows.enumerated()), id: \.element.id) { index, row in
                         MarketRankingRow(rank: index + 1, row: row, metric: metric)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 onSelect(row.symbol)
                             }
-                        if row.id != rows.last?.id {
+                        if row.id != visibleRows.last?.id {
                             Divider()
                                 .padding(.leading, 16)
                         }
+                    }
+                    if rows.count > visibleRows.count {
+                        Text("화면 성능을 위해 상위 \(visibleRows.count)개만 표시합니다. 전체 흐름은 섹터 히트맵에서 확인하세요.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(14)
                     }
                 }
             }

@@ -778,162 +778,29 @@ final class AppSession: ObservableObject {
     }
 
     func refreshMarketActivity() async {
-        await importTossCLIRankingIfEnabled()
         let publicRankings = await fetchPublicDomesticRankings()
         let domesticRankings = publicRankings.rows
         let overseasRankings = await fetchPublicOverseasRankings()
         let externalRankings = mergedMarketActivities(primary: domesticRankings, secondary: overseasRankings)
         mergeMarketActivityStockInfos(externalRankings)
 
-        guard canUseAPI() else {
-            if !externalRankings.isEmpty {
-                marketActivities = mergedMarketActivities(
-                    primary: externalRankings,
-                    secondary: demoMarketActivitiesFromDirectory().filter { !$0.isDomestic }
-                )
-                marketActivitySourceText = marketActivitySourceDescription(
-                    source: publicRankings.source,
-                    externalCount: domesticRankings.count,
-                    overseasCount: overseasRankings.count,
-                    candidateCount: 0,
-                    usesOfficialCandidates: false,
-                    usesDemoFallback: true
-                )
-                updateMarketActivityQuality(
-                    source: publicRankings.source,
-                    rows: domesticRankings,
-                    externalCount: domesticRankings.count,
-                    usesOfficialCandidates: false,
-                    usesDemoFallback: true
-                )
-            }
-            if externalRankings.isEmpty {
-                marketActivitySourceText = marketActivitySourceDescription(
-                    source: publicRankings.source,
-                    externalCount: 0,
-                    overseasCount: overseasRankings.count,
-                    candidateCount: 0,
-                    usesOfficialCandidates: false,
-                    usesDemoFallback: true
-                )
-            }
-            updateMarketActivityQuality(
-                source: publicRankings.source,
-                rows: domesticRankings,
-                externalCount: domesticRankings.count,
-                usesOfficialCandidates: false,
-                usesDemoFallback: true
-            )
-            return
-        }
-
-        guard credentials.isComplete else {
-            connectionState = .demo
-            let demoActivities = demoMarketActivitiesFromDirectory()
-            marketActivities = externalRankings.isEmpty
-                ? demoActivities
-                : mergedMarketActivities(
-                    primary: externalRankings,
-                    secondary: demoActivities
-                )
-            marketActivitySourceText = marketActivitySourceDescription(
-                source: publicRankings.source,
-                externalCount: domesticRankings.count,
-                overseasCount: overseasRankings.count,
-                candidateCount: 0,
-                usesOfficialCandidates: false,
-                usesDemoFallback: true
-            )
-            updateMarketActivityQuality(
-                source: publicRankings.source,
-                rows: domesticRankings,
-                externalCount: domesticRankings.count,
-                usesOfficialCandidates: false,
-                usesDemoFallback: true
-            )
-            return
-        }
-
-        connectionState = .loading
-
-        do {
-            let accessToken = try await validAccessToken()
-            let symbols = marketActivitySymbols()
-            let priceResults = try await client.prices(symbols: symbols, accessToken: accessToken)
-            let unknownSymbols = symbols.filter { symbol in
-                !stockDirectory.contains { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }
-            }
-            if !unknownSymbols.isEmpty,
-               let stocks = try? await client.stocks(symbols: unknownSymbols, accessToken: accessToken) {
-                mergeStockInfos(stocks)
-            }
-
-            var snapshots: [MarketActivitySnapshot] = []
-            for price in priceResults {
-                let tradeVolume = price.volumeValue
-                let tradeValue = price.volumeValue.map { price.lastPriceValue * $0 }
-                let info = stockDirectory.first {
-                    $0.symbol.caseInsensitiveCompare(price.symbol) == .orderedSame
-                }
-
-                snapshots.append(
-                    MarketActivitySnapshot(
-                        symbol: price.symbol,
-                        name: info?.name ?? price.symbol,
-                        englishName: info?.englishName ?? price.symbol,
-                        market: info?.market ?? (price.currency == "KRW" ? "KR" : "US"),
-                        currency: price.currency,
-                        lastPrice: price.lastPrice,
-                        timestamp: price.timestamp,
-                        tradeVolume: tradeVolume,
-                        tradeValue: tradeValue,
-                        tradeSampleCount: 0,
-                        updatedAt: Date()
-                    )
-                )
-            }
-
-            marketActivities = externalRankings.isEmpty
-                ? snapshots
-                : mergedMarketActivities(primary: externalRankings, secondary: snapshots)
-            marketActivitySourceText = marketActivitySourceDescription(
-                source: publicRankings.source,
-                externalCount: domesticRankings.count,
-                overseasCount: overseasRankings.count,
-                candidateCount: symbols.count,
-                usesOfficialCandidates: true,
-                usesDemoFallback: false
-            )
-            updateMarketActivityQuality(
-                source: publicRankings.source,
-                rows: domesticRankings,
-                externalCount: domesticRankings.count,
-                usesOfficialCandidates: true,
-                usesDemoFallback: false
-            )
-            apiCooldownUntil = nil
-            connectionState = .live(Date())
-        } catch {
-            if !externalRankings.isEmpty {
-                marketActivities = externalRankings
-                marketActivitySourceText = marketActivitySourceDescription(
-                    source: publicRankings.source,
-                    externalCount: domesticRankings.count,
-                    overseasCount: overseasRankings.count,
-                    candidateCount: 0,
-                    usesOfficialCandidates: false,
-                    usesDemoFallback: false
-                )
-                updateMarketActivityQuality(
-                    source: publicRankings.source,
-                    rows: domesticRankings,
-                    externalCount: domesticRankings.count,
-                    usesOfficialCandidates: false,
-                    usesDemoFallback: false
-                )
-            }
-            handleAPIError(error)
-        }
+        let usesDemoFallback = externalRankings.isEmpty
+        marketActivities = usesDemoFallback ? demoMarketActivitiesFromDirectory() : externalRankings
+        marketActivitySourceText = marketActivitySourceDescription(
+            source: publicRankings.source,
+            externalCount: domesticRankings.count,
+            overseasCount: overseasRankings.count,
+            candidateCount: 0,
+            usesOfficialCandidates: false,
+            usesDemoFallback: usesDemoFallback
+        )
+        updateMarketActivityQuality(
+            source: publicRankings.source,
+            rows: domesticRankings,
+            externalCount: domesticRankings.count,
+            usesOfficialCandidates: false,
+            usesDemoFallback: usesDemoFallback
+        )
     }
 
     private func fetchPublicDomesticRankings() async -> (source: PublicDomesticRankingSource, rows: [MarketActivitySnapshot]) {
@@ -943,7 +810,7 @@ final class AppSession: ObservableObject {
         }
 
         do {
-            let rankings = try await naverRankingClient.tradeValueRanking(limit: 150)
+            let rankings = try await naverRankingClient.tradeValueRanking(limit: 1_200)
             if !rankings.isEmpty {
                 publicDomesticRankingCache = (Date(), .naver, rankings)
                 return (.naver, rankings)
@@ -1046,24 +913,27 @@ final class AppSession: ObservableObject {
             switch source {
             case .naver:
                 parts = [
+                    "시세 탭은 토스 API를 사용하지 않습니다.",
                     "국내장은 네이버 모바일 공개 시세에서 KOSPI/KOSDAQ 전 종목을 페이징 조회한 뒤 거래대금순 상위 \(externalCount)개를 사용합니다.",
                     "거래대금은 네이버 누적 거래대금 값을 원화로 환산합니다."
                 ]
             case .nextrade:
                 parts = [
+                    "시세 탭은 토스 API를 사용하지 않습니다.",
                     "국내장은 넥스트레이드 공개 거래대금 상위 \(externalCount)개를 우선 사용합니다.",
                     "NXT 정규시장 체결 기준이며 약 20분 지연될 수 있습니다."
                 ]
             case .none:
                 parts = [
+                    "시세 탭은 토스 API를 사용하지 않습니다.",
                     "국내 공개 거래대금 랭킹을 가져오지 못해 앱 후보 데이터를 사용합니다."
                 ]
             }
             if usesOfficialCandidates {
-                parts.append("그 밖의 후보 \(candidateCount)개는 토스 공식 현재가 API의 현재가 x 거래량으로 계산합니다.")
+                parts.append("그 밖의 후보 \(candidateCount)개는 공개 시세 후보의 현재가 x 거래량으로 계산합니다.")
             }
             if usesDemoFallback {
-                parts.append("토스 API 키가 없거나 쿨다운 중인 범위는 데모 후보로 채웁니다.")
+                parts.append("공개 데이터가 비어 있는 범위는 앱 기본 후보로만 채웁니다.")
             }
             if overseasCount > 0 {
                 parts.append("해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 함께 가져옵니다.")
@@ -1073,23 +943,24 @@ final class AppSession: ObservableObject {
 
         if overseasCount > 0 {
             var parts = [
+                "시세 탭은 토스 API를 사용하지 않습니다.",
                 "국내 공개 거래대금 랭킹은 가져오지 못했지만, 해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 가져옵니다."
             ]
             if usesDemoFallback {
-                parts.append("국내와 토스 미조회 범위는 데모 후보로 채웁니다.")
+                parts.append("공개 데이터가 비어 있는 범위는 앱 기본 후보로만 채웁니다.")
             }
             return parts.joined(separator: " ")
         }
 
         if usesOfficialCandidates {
-            let base = "NXT 공개 거래대금 랭킹을 가져오지 못해 앱 후보 \(candidateCount)개를 토스 공식 현재가 API로 조회한 뒤 현재가 x 거래량으로 계산합니다. 전체 시장 거래대금 Top100은 아닙니다."
+            let base = "공개 거래대금 랭킹을 가져오지 못해 앱 후보 \(candidateCount)개를 현재가 x 거래량으로 계산합니다. 전체 시장 거래대금 Top100은 아닙니다."
             if tossCLISettings.isEnabled {
                 return "\(base) tossctl은 토스 웹 인기순위 후보 보강용이며 거래대금 Top100 원본으로 쓰지 않습니다."
             }
             return base
         }
 
-        return "데모 예시 데이터입니다. 실제 시장 순위가 아닙니다."
+        return "시세 탭은 토스 API를 사용하지 않습니다. 공개 시장 데이터를 가져오지 못해 데모 예시 데이터를 표시합니다."
     }
 
     private func updateMarketActivityQuality(
