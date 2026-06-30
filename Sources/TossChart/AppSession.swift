@@ -964,7 +964,7 @@ final class AppSession: ObservableObject {
                 parts.append("공개 데이터가 비어 있는 범위는 앱 기본 후보로만 채웁니다.")
             }
             if overseasCount > 0 {
-                parts.append("해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 함께 가져옵니다.")
+                parts.append("해외장은 Yahoo Finance 공개 스크리너와 대표 반도체 유니버스를 합쳐 \(overseasCount)개를 가져옵니다.")
             }
             return parts.joined(separator: " ")
         }
@@ -972,7 +972,7 @@ final class AppSession: ObservableObject {
         if overseasCount > 0 {
             var parts = [
                 "시세 탭은 토스 API를 사용하지 않습니다.",
-                "국내 공개 거래대금 랭킹은 가져오지 못했지만, 해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 가져옵니다."
+                "국내 공개 거래대금 랭킹은 가져오지 못했지만, 해외장은 Yahoo Finance 공개 스크리너와 대표 반도체 유니버스를 합쳐 \(overseasCount)개를 가져옵니다."
             ]
             if usesDemoFallback {
                 parts.append("공개 데이터가 비어 있는 범위는 앱 기본 후보로만 채웁니다.")

@@ -1784,7 +1784,11 @@ private func marketSector(for row: MarketActivitySnapshot) -> MarketSector {
     let symbol = row.symbol.uppercased()
     let text = "\(row.name) \(row.englishName) \(row.market) \(symbol)".lowercased()
 
-    let semiconductorSymbols: Set<String> = ["005930", "000660", "009150", "042700", "011070", "NVDA", "AMD", "AVGO", "TSM", "INTC", "ASML"]
+    let semiconductorSymbols: Set<String> = [
+        "005930", "000660", "009150", "042700", "011070",
+        "NVDA", "AMD", "AVGO", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU", "INTC", "QCOM", "ARM", "MRVL",
+        "ON", "NXPI", "MCHP", "TXN", "ADI", "MPWR", "GFS", "UMC", "AMKR", "COHR", "ACMR"
+    ]
     let batterySymbols: Set<String> = ["373220", "006400", "051910", "096770", "247540", "086520", "450080", "003670", "066970", "361610"]
     let healthcareSymbols: Set<String> = ["068270", "207940", "000100", "128940", "196170", "HLB"]
     let platformSymbols: Set<String> = ["035420", "035720", "AAPL", "MSFT", "GOOGL", "META", "AMZN", "NFLX", "PLTR"]
