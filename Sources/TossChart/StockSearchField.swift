@@ -10,9 +10,23 @@ struct StockSearchField: View {
     var onSelect: (String) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
+    @State private var onlineSuggestions: [StockSearchItem] = []
+
+    private var localSuggestions: [StockSearchItem] {
+        session.stockSuggestions(for: text)
+    }
 
     private var suggestions: [StockSearchItem] {
-        session.stockSuggestions(for: text)
+        var seen = Set<String>()
+        let merged = (localSuggestions + onlineSuggestions).compactMap { item -> StockSearchItem? in
+            let key = item.symbol.uppercased()
+            guard !seen.contains(key) else {
+                return nil
+            }
+            seen.insert(key)
+            return item
+        }
+        return Array(merged.prefix(8))
     }
 
     private var unavailableHint: String? {
@@ -35,6 +49,18 @@ struct StockSearchField: View {
                 .frame(width: width)
                 .onSubmit {
                     choose(session.resolveSymbol(from: text))
+                }
+                .task(id: text) {
+                    let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard isFocused, query.count >= 2 else {
+                        onlineSuggestions = []
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    onlineSuggestions = await session.onlineStockSuggestions(for: query)
                 }
 
             if isFocused, !suggestions.isEmpty {

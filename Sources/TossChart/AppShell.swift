@@ -49,13 +49,19 @@ struct AppShell: View {
             }
             .environmentObject(session)
             .task {
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                await session.refreshSelectedSectionIfNeeded(force: true)
+                let section = session.selectedSection
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                if !Task.isCancelled {
+                    await session.refreshSectionIfNeeded(section)
+                }
             }
             .onChange(of: session.selectedSection) { _, _ in
+                let section = session.selectedSection
                 Task {
-                    try? await Task.sleep(nanoseconds: 80_000_000)
-                    await session.refreshSelectedSectionIfNeeded()
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    if !Task.isCancelled {
+                        await session.refreshSectionIfNeeded(section)
+                    }
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -1687,7 +1693,7 @@ private func marketSector(for row: MarketActivitySnapshot) -> MarketSector {
     let text = "\(row.name) \(row.englishName) \(row.market) \(symbol)".lowercased()
 
     let semiconductorSymbols: Set<String> = ["005930", "000660", "009150", "042700", "011070", "NVDA", "AMD", "AVGO", "TSM", "INTC", "ASML"]
-    let batterySymbols: Set<String> = ["373220", "006400", "051910", "096770", "247540", "086520", "003670"]
+    let batterySymbols: Set<String> = ["373220", "006400", "051910", "096770", "247540", "086520", "450080", "003670", "066970", "361610"]
     let healthcareSymbols: Set<String> = ["068270", "207940", "000100", "128940", "196170", "HLB"]
     let platformSymbols: Set<String> = ["035420", "035720", "AAPL", "MSFT", "GOOGL", "META", "AMZN", "NFLX", "PLTR"]
     let autoSymbols: Set<String> = ["005380", "000270", "TSLA", "GM", "F"]
@@ -1700,7 +1706,20 @@ private func marketSector(for row: MarketActivitySnapshot) -> MarketSector {
     if semiconductorSymbols.contains(symbol) || text.contains("반도체") || text.contains("semiconductor") || text.contains("hynix") {
         return .semiconductor
     }
-    if batterySymbols.contains(symbol) || text.contains("battery") || text.contains("sdi") || text.contains("energy solution") || text.contains("2차전지") || text.contains("에너지솔루션") {
+    if batterySymbols.contains(symbol) ||
+        text.contains("battery") ||
+        text.contains("sdi") ||
+        text.contains("energy solution") ||
+        text.contains("2차전지") ||
+        text.contains("에너지솔루션") ||
+        text.contains("에코프로") ||
+        text.contains("ecopro") ||
+        text.contains("엘앤에프") ||
+        text.contains("l&f") ||
+        text.contains("퓨처엠") ||
+        text.contains("future m") ||
+        text.contains("양극재") ||
+        text.contains("분리막") {
         return .battery
     }
     if healthcareSymbols.contains(symbol) || text.contains("셀트리온") || text.contains("bio") || text.contains("pharma") || text.contains("health") || text.contains("medical") {

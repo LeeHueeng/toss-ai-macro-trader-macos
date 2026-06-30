@@ -93,6 +93,7 @@ final class AppSession: ObservableObject {
     private let client = TossInvestClient()
     private let naverRankingClient = NaverMarketRankingClient()
     private let nextradeClient = NextradeMarketRankingClient()
+    private let yahooFinanceClient = YahooFinanceClient()
     private let store = LocalJSONStore()
     private let aiRunner = AICommandRunner()
     private let notifications = NotificationService()
@@ -104,6 +105,7 @@ final class AppSession: ObservableObject {
     private var strategyCandleCache: [String: [Candle]] = [:]
     private var lastTossCLIRankingImportAt: Date?
     private var publicDomesticRankingCache: (updatedAt: Date, source: PublicDomesticRankingSource, rows: [MarketActivitySnapshot])?
+    private var publicOverseasRankingCache: (updatedAt: Date, rows: [MarketActivitySnapshot])?
     private var latestPublicDomesticRankingSource: PublicDomesticRankingSource = .none
     private var sectionRefreshTimestamps: [String: Date] = [:]
     private var sectionRefreshesInFlight = Set<String>()
@@ -209,6 +211,37 @@ final class AppSession: ObservableObject {
                 return left.name < right.name
             }
         return Array(matches.prefix(limit))
+    }
+
+    func onlineStockSuggestions(for query: String, limit: Int = 8) async -> [StockSearchItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2, !isAIRunning else {
+            return []
+        }
+
+        do {
+            let items = try await yahooFinanceClient.search(query: trimmed, limit: limit)
+            mergeStockSearchItems(items)
+            return items
+        } catch {
+            return []
+        }
+    }
+
+    private func mergeStockSearchItems(_ items: [StockSearchItem]) {
+        for item in items {
+            if let index = stockDirectory.firstIndex(where: { $0.symbol.caseInsensitiveCompare(item.symbol) == .orderedSame }) {
+                stockDirectory[index].name = item.name
+                stockDirectory[index].englishName = item.englishName
+                stockDirectory[index].market = item.market
+                stockDirectory[index].currency = item.currency
+                for alias in item.aliases where !stockDirectory[index].aliases.contains(alias) {
+                    stockDirectory[index].aliases.append(alias)
+                }
+            } else {
+                stockDirectory.append(item)
+            }
+        }
     }
 
     func stockName(for symbol: String) -> String? {
@@ -415,6 +448,9 @@ final class AppSession: ObservableObject {
         guard !sectionRefreshesInFlight.contains(key) else {
             return
         }
+        if isAIRunning, !force {
+            return
+        }
 
         let now = Date()
         if !force,
@@ -452,11 +488,11 @@ final class AppSession: ObservableObject {
     private func sectionRefreshInterval(for section: SidebarSection) -> TimeInterval {
         switch section {
         case .dashboard:
-            return 20
+            return 60
         case .strategyManager, .aiAnalysis:
-            return 30
+            return 90
         case .market, .watchlist, .account:
-            return 45
+            return 120
         case .orderLog, .settings:
             return 120
         }
@@ -744,7 +780,9 @@ final class AppSession: ObservableObject {
     func refreshMarketActivity() async {
         await importTossCLIRankingIfEnabled()
         let publicRankings = await fetchPublicDomesticRankings()
-        let externalRankings = publicRankings.rows
+        let domesticRankings = publicRankings.rows
+        let overseasRankings = await fetchPublicOverseasRankings()
+        let externalRankings = mergedMarketActivities(primary: domesticRankings, secondary: overseasRankings)
         mergeMarketActivityStockInfos(externalRankings)
 
         guard canUseAPI() else {
@@ -755,15 +793,16 @@ final class AppSession: ObservableObject {
                 )
                 marketActivitySourceText = marketActivitySourceDescription(
                     source: publicRankings.source,
-                    externalCount: externalRankings.count,
+                    externalCount: domesticRankings.count,
+                    overseasCount: overseasRankings.count,
                     candidateCount: 0,
                     usesOfficialCandidates: false,
                     usesDemoFallback: true
                 )
                 updateMarketActivityQuality(
                     source: publicRankings.source,
-                    rows: externalRankings,
-                    externalCount: externalRankings.count,
+                    rows: domesticRankings,
+                    externalCount: domesticRankings.count,
                     usesOfficialCandidates: false,
                     usesDemoFallback: true
                 )
@@ -772,6 +811,7 @@ final class AppSession: ObservableObject {
                 marketActivitySourceText = marketActivitySourceDescription(
                     source: publicRankings.source,
                     externalCount: 0,
+                    overseasCount: overseasRankings.count,
                     candidateCount: 0,
                     usesOfficialCandidates: false,
                     usesDemoFallback: true
@@ -779,8 +819,8 @@ final class AppSession: ObservableObject {
             }
             updateMarketActivityQuality(
                 source: publicRankings.source,
-                rows: externalRankings,
-                externalCount: externalRankings.count,
+                rows: domesticRankings,
+                externalCount: domesticRankings.count,
                 usesOfficialCandidates: false,
                 usesDemoFallback: true
             )
@@ -794,19 +834,20 @@ final class AppSession: ObservableObject {
                 ? demoActivities
                 : mergedMarketActivities(
                     primary: externalRankings,
-                    secondary: demoActivities.filter { !$0.isDomestic }
+                    secondary: demoActivities
                 )
             marketActivitySourceText = marketActivitySourceDescription(
                 source: publicRankings.source,
-                externalCount: externalRankings.count,
+                externalCount: domesticRankings.count,
+                overseasCount: overseasRankings.count,
                 candidateCount: 0,
                 usesOfficialCandidates: false,
                 usesDemoFallback: true
             )
             updateMarketActivityQuality(
                 source: publicRankings.source,
-                rows: externalRankings,
-                externalCount: externalRankings.count,
+                rows: domesticRankings,
+                externalCount: domesticRankings.count,
                 usesOfficialCandidates: false,
                 usesDemoFallback: true
             )
@@ -857,15 +898,16 @@ final class AppSession: ObservableObject {
                 : mergedMarketActivities(primary: externalRankings, secondary: snapshots)
             marketActivitySourceText = marketActivitySourceDescription(
                 source: publicRankings.source,
-                externalCount: externalRankings.count,
+                externalCount: domesticRankings.count,
+                overseasCount: overseasRankings.count,
                 candidateCount: symbols.count,
                 usesOfficialCandidates: true,
                 usesDemoFallback: false
             )
             updateMarketActivityQuality(
                 source: publicRankings.source,
-                rows: externalRankings,
-                externalCount: externalRankings.count,
+                rows: domesticRankings,
+                externalCount: domesticRankings.count,
                 usesOfficialCandidates: true,
                 usesDemoFallback: false
             )
@@ -876,15 +918,16 @@ final class AppSession: ObservableObject {
                 marketActivities = externalRankings
                 marketActivitySourceText = marketActivitySourceDescription(
                     source: publicRankings.source,
-                    externalCount: externalRankings.count,
+                    externalCount: domesticRankings.count,
+                    overseasCount: overseasRankings.count,
                     candidateCount: 0,
                     usesOfficialCandidates: false,
                     usesDemoFallback: false
                 )
                 updateMarketActivityQuality(
                     source: publicRankings.source,
-                    rows: externalRankings,
-                    externalCount: externalRankings.count,
+                    rows: domesticRankings,
+                    externalCount: domesticRankings.count,
                     usesOfficialCandidates: false,
                     usesDemoFallback: false
                 )
@@ -923,11 +966,28 @@ final class AppSession: ObservableObject {
         return (.none, [])
     }
 
+    private func fetchPublicOverseasRankings() async -> [MarketActivitySnapshot] {
+        if let cache = publicOverseasRankingCache,
+           Date().timeIntervalSince(cache.updatedAt) < 120 {
+            return cache.rows
+        }
+
+        do {
+            let rankings = try await yahooFinanceClient.marketActivityRanking(limit: 180)
+            if !rankings.isEmpty {
+                publicOverseasRankingCache = (Date(), rankings)
+                return rankings
+            }
+        } catch {
+            return []
+        }
+
+        return []
+    }
+
     private func mergeMarketActivityStockInfos(_ rows: [MarketActivitySnapshot]) {
         for row in rows {
-            guard !row.symbol.hasPrefix("NXT-"),
-                  row.symbol.allSatisfy(\.isNumber),
-                  row.symbol.count == 6 else {
+            guard !row.symbol.hasPrefix("NXT-") else {
                 continue
             }
 
@@ -976,6 +1036,7 @@ final class AppSession: ObservableObject {
     private func marketActivitySourceDescription(
         source: PublicDomesticRankingSource,
         externalCount: Int,
+        overseasCount: Int = 0,
         candidateCount: Int,
         usesOfficialCandidates: Bool,
         usesDemoFallback: Bool
@@ -1003,6 +1064,19 @@ final class AppSession: ObservableObject {
             }
             if usesDemoFallback {
                 parts.append("토스 API 키가 없거나 쿨다운 중인 범위는 데모 후보로 채웁니다.")
+            }
+            if overseasCount > 0 {
+                parts.append("해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 함께 가져옵니다.")
+            }
+            return parts.joined(separator: " ")
+        }
+
+        if overseasCount > 0 {
+            var parts = [
+                "국내 공개 거래대금 랭킹은 가져오지 못했지만, 해외장은 Yahoo Finance 공개 스크리너에서 거래활발/급등/급락 종목 \(overseasCount)개를 가져옵니다."
+            ]
+            if usesDemoFallback {
+                parts.append("국내와 토스 미조회 범위는 데모 후보로 채웁니다.")
             }
             return parts.joined(separator: " ")
         }
@@ -1056,7 +1130,7 @@ final class AppSession: ObservableObject {
                 : "검증된 공개 거래대금 랭킹을 가져오지 못했습니다."
         }
 
-        marketActivityQualityText = "자동선택 차단: \(reason)"
+        marketActivityQualityText = "국내 자동선택 차단: \(reason)"
         marketActivitySourceText = "\(marketActivitySourceText) \(marketActivityQualityText)"
     }
 
@@ -1093,7 +1167,15 @@ final class AppSession: ObservableObject {
 
     func marketActivityAutomationBlockReason(scope: MarketScope) -> String? {
         if scope == .overseas {
-            return "해외장은 아직 전 종목 거래대금 공개 랭킹을 검증하지 못해서 자동선택을 막았습니다. 국내 또는 전체 모드에서 국내 종목 기준으로 먼저 진행하세요."
+            let hasOverseasRanking = marketActivities.contains { row in
+                !row.isDomestic &&
+                    row.tradeValue != nil &&
+                    row.tradeVolume != nil &&
+                    row.changePercent != nil
+            }
+            return hasOverseasRanking
+                ? nil
+                : "해외장 공개 스크리너 데이터를 아직 가져오지 못했습니다. 시세 탭을 새로고침한 뒤 다시 시도하세요."
         }
         guard marketActivityAllowsAutoSelection else {
             return marketActivityQualityText
