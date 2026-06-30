@@ -421,7 +421,7 @@ struct DashboardView: View {
                         connectionState: session.connectionState
                     )
 
-                    HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
                         StockInsightPanel(
                             symbol: session.selectedSymbol,
                             name: selectedName,
@@ -431,7 +431,7 @@ struct DashboardView: View {
                         .frame(maxWidth: .infinity)
 
                         WatchlistBriefPanel()
-                            .frame(width: 360)
+                            .frame(maxWidth: .infinity)
                     }
 
                     RuntimeStatusPanel()
@@ -793,19 +793,23 @@ struct WatchlistBriefPanel: View {
             }
 
             if let brief = session.latestWatchlistBrief {
-                Text(brief.output)
-                    .font(.callout)
-                    .lineLimit(6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                ScrollView {
+                    Text(brief.output)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                }
+                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 420, alignment: .topLeading)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
             } else {
                 Text("아직 생성된 브리프가 없습니다.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
                     .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
             }
 
@@ -2133,12 +2137,11 @@ struct WatchlistView: View {
                         showsAlertSheet = true
                     }
 
-                    HStack(alignment: .top, spacing: 16) {
-                        PriceAlertsPanel()
-                            .frame(maxWidth: .infinity)
-                        WatchlistBriefPanel()
-                            .frame(width: 380)
-                    }
+                    WatchlistBriefPanel()
+                        .frame(maxWidth: .infinity)
+
+                    PriceAlertsPanel()
+                        .frame(maxWidth: .infinity)
                 }
                 .padding(20)
             }
