@@ -1,0 +1,27 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserdata/
+*.xcuserstate
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Local app/runtime state
+state.json
+*.log
+*.pid
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.p8
+*.key
+*.mobileprovision
+
+# Node helper dependencies
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
