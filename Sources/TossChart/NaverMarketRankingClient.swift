@@ -14,11 +14,18 @@ private struct NaverMarketStock: Decodable {
     let stockName: String
     let stockEndType: String?
     let closePrice: String
+    let compareToPreviousClosePrice: String?
+    let compareToPreviousPrice: NaverCompareToPreviousPrice?
+    let fluctuationsRatio: String?
     let accumulatedTradingVolume: String
     let accumulatedTradingValue: String
     let accumulatedTradingValueKrwHangeul: String?
     let localTradedAt: String?
     let stockExchangeType: NaverStockExchangeType?
+}
+
+private struct NaverCompareToPreviousPrice: Decodable {
+    let name: String?
 }
 
 private struct NaverStockExchangeType: Decodable {
@@ -63,6 +70,9 @@ struct NaverMarketRankingClient {
 
                 let tradeValue = numericDecimal(stock.accumulatedTradingValue) * Decimal(1_000_000)
                 let lastPrice = numericDecimal(stock.closePrice)
+                let sign = stock.compareToPreviousPrice?.name == "FALLING" ? -1.0 : 1.0
+                let priceChange = stock.compareToPreviousClosePrice.map { Decimal(sign) * numericDecimal($0) }
+                let changePercent = stock.fluctuationsRatio.map { sign * numericDouble($0) }
                 return MarketActivitySnapshot(
                     symbol: stock.itemCode,
                     name: stock.stockName,
@@ -74,7 +84,9 @@ struct NaverMarketRankingClient {
                     tradeVolume: numericDecimal(stock.accumulatedTradingVolume),
                     tradeValue: tradeValue,
                     tradeSampleCount: 0,
-                    updatedAt: Date()
+                    updatedAt: Date(),
+                    priceChange: priceChange,
+                    changePercent: changePercent
                 )
             }
 
@@ -123,5 +135,9 @@ struct NaverMarketRankingClient {
                 .replacingOccurrences(of: ",", with: "")
                 .replacingOccurrences(of: "N/A", with: "0")
         )
+    }
+
+    private func numericDouble(_ value: String) -> Double {
+        NSDecimalNumber(decimal: numericDecimal(value)).doubleValue
     }
 }

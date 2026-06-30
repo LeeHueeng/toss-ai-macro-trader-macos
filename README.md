@@ -44,6 +44,12 @@ OpenStock의 Watchlist UX를 macOS 앱 방식으로 재구성했습니다.
 
 ### 시장 랭킹
 
+- OpenStock의 Market Overview / Stock Heatmap UX를 SwiftUI 네이티브로 재구성
+- 시장 개요와 랭킹 탭 전환
+- 반도체, 2차전지, 바이오/의료, 인터넷/플랫폼, 자동차 등 섹터별 흐름 표시
+- 섹터별 가중 평균 등락률
+- 빨강/파랑 히트맵으로 상승/하락 종목 표시
+- 섹터별 종목 필터
 - 국내/해외/전체 필터
 - 거래대금/거래량 정렬
 - 네이버 모바일 공개 시세 기반 KOSPI/KOSDAQ 거래대금 랭킹

@@ -303,6 +303,60 @@ enum MarketRankingMetric: String, CaseIterable, Identifiable {
     }
 }
 
+enum MarketSector: String, CaseIterable, Identifiable {
+    case all
+    case semiconductor
+    case battery
+    case healthcare
+    case internetPlatform
+    case auto
+    case finance
+    case steelMaterials
+    case energyIndustrial
+    case consumer
+    case aerospaceDefense
+    case etfIndex
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "전체"
+        case .semiconductor: "반도체"
+        case .battery: "2차전지"
+        case .healthcare: "바이오/의료"
+        case .internetPlatform: "인터넷/플랫폼"
+        case .auto: "자동차"
+        case .finance: "금융"
+        case .steelMaterials: "철강/소재"
+        case .energyIndustrial: "에너지/산업재"
+        case .consumer: "소비재"
+        case .aerospaceDefense: "우주/방산"
+        case .etfIndex: "ETF/지수"
+        case .other: "기타"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: "square.grid.3x3"
+        case .semiconductor: "cpu"
+        case .battery: "battery.100"
+        case .healthcare: "cross.case"
+        case .internetPlatform: "network"
+        case .auto: "car"
+        case .finance: "banknote"
+        case .steelMaterials: "hammer"
+        case .energyIndustrial: "bolt"
+        case .consumer: "cart"
+        case .aerospaceDefense: "airplane"
+        case .etfIndex: "chart.pie"
+        case .other: "ellipsis.circle"
+        }
+    }
+}
+
 enum ChartTimeframe: String, CaseIterable, Identifiable {
     case oneMinuteRegular
     case oneMinuteExtended
@@ -362,6 +416,38 @@ struct MarketActivitySnapshot: Identifiable, Equatable {
     let tradeValue: Decimal?
     let tradeSampleCount: Int
     let updatedAt: Date
+    let priceChange: Decimal?
+    let changePercent: Double?
+
+    init(
+        symbol: String,
+        name: String,
+        englishName: String,
+        market: String,
+        currency: String,
+        lastPrice: String,
+        timestamp: String?,
+        tradeVolume: Decimal?,
+        tradeValue: Decimal?,
+        tradeSampleCount: Int,
+        updatedAt: Date,
+        priceChange: Decimal? = nil,
+        changePercent: Double? = nil
+    ) {
+        self.symbol = symbol
+        self.name = name
+        self.englishName = englishName
+        self.market = market
+        self.currency = currency
+        self.lastPrice = lastPrice
+        self.timestamp = timestamp
+        self.tradeVolume = tradeVolume
+        self.tradeValue = tradeValue
+        self.tradeSampleCount = tradeSampleCount
+        self.updatedAt = updatedAt
+        self.priceChange = priceChange
+        self.changePercent = changePercent
+    }
 
     var lastPriceValue: Decimal {
         decimalValue(lastPrice)

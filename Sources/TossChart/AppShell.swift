@@ -858,11 +858,11 @@ struct ChartPanel: View {
     private var maxRenderedCandles: Int {
         switch timeframe {
         case .oneMinuteExtended:
-            420
+            300
         case .oneMinuteRegular:
-            390
+            260
         case .daily, .weekly, .monthly:
-            220
+            180
         }
     }
 
@@ -1245,10 +1245,33 @@ struct HoldingsPanel: View {
     }
 }
 
+private enum MarketScreenMode: String, CaseIterable, Identifiable {
+    case overview
+    case ranking
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: "시장 개요"
+        case .ranking: "랭킹"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: "square.grid.3x3.fill"
+        case .ranking: "list.number"
+        }
+    }
+}
+
 struct MarketView: View {
     @EnvironmentObject private var session: AppSession
+    @State private var selectedMode: MarketScreenMode = .overview
     @State private var selectedScope: MarketScope = .all
     @State private var selectedMetric: MarketRankingMetric = .tradingValue
+    @State private var selectedSector: MarketSector = .all
 
     private var rankedActivities: [MarketActivitySnapshot] {
         session.marketActivities
@@ -1266,9 +1289,17 @@ struct MarketView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Label("거래 랭킹", systemImage: "list.bullet.rectangle")
+                Label("시장", systemImage: selectedMode.systemImage)
                     .font(.title3.weight(.semibold))
                 Spacer()
+                Picker("보기", selection: $selectedMode) {
+                    ForEach(MarketScreenMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+
                 Picker("시장", selection: $selectedScope) {
                     ForEach(MarketScope.allCases) { scope in
                         Text(scope.title).tag(scope)
@@ -1300,25 +1331,419 @@ struct MarketView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     MarketDataSourceNotice(text: session.marketActivitySourceText)
 
-                    MarketRankingSummary(
-                        rows: rankedActivities,
-                        scope: selectedScope,
-                        metric: selectedMetric
-                    )
+                    if selectedMode == .overview {
+                        SectorMarketOverview(
+                            rows: rankedActivities,
+                            selectedSector: $selectedSector
+                        ) { symbol in
+                            session.selectedSymbol = symbol
+                            Task { await session.refreshMarketData() }
+                        }
+                    } else {
+                        MarketRankingSummary(
+                            rows: rankedActivities,
+                            scope: selectedScope,
+                            metric: selectedMetric
+                        )
 
-                    MarketRankingPanel(
-                        rows: rankedActivities,
-                        metric: selectedMetric,
-                        sourceText: session.marketActivitySourceText
-                    ) { symbol in
-                        session.selectedSymbol = symbol
-                        Task { await session.refreshMarketData() }
+                        MarketRankingPanel(
+                            rows: rankedActivities,
+                            metric: selectedMetric,
+                            sourceText: session.marketActivitySourceText
+                        ) { symbol in
+                            session.selectedSymbol = symbol
+                            Task { await session.refreshMarketData() }
+                        }
                     }
                 }
                 .padding(20)
             }
         }
     }
+}
+
+private struct SectorSummary: Identifiable {
+    var id: String { sector.id }
+    let sector: MarketSector
+    let rows: [MarketActivitySnapshot]
+    let averageChange: Double?
+    let totalTradeValue: Decimal
+
+    var risingCount: Int {
+        rows.filter { ($0.changePercent ?? 0) > 0 }.count
+    }
+
+    var fallingCount: Int {
+        rows.filter { ($0.changePercent ?? 0) < 0 }.count
+    }
+}
+
+private struct SectorMarketOverview: View {
+    let rows: [MarketActivitySnapshot]
+    @Binding var selectedSector: MarketSector
+    let onSelect: (String) -> Void
+
+    private var summaries: [SectorSummary] {
+        sectorSummaries(from: rows)
+    }
+
+    private var filteredRows: [MarketActivitySnapshot] {
+        let scoped = selectedSector == .all
+            ? rows
+            : rows.filter { marketSector(for: $0) == selectedSector }
+        return Array(scoped.prefix(90))
+    }
+
+    private var leadingSector: SectorSummary? {
+        summaries
+            .filter { $0.averageChange != nil }
+            .max { ($0.averageChange ?? -999) < ($1.averageChange ?? -999) }
+    }
+
+    private var weakestSector: SectorSummary? {
+        summaries
+            .filter { $0.averageChange != nil }
+            .min { ($0.averageChange ?? 999) < ($1.averageChange ?? 999) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                overviewMetric(
+                    "강한 섹터",
+                    leadingSector?.sector.title ?? "-",
+                    leadingSector.flatMap { changeText($0.averageChange) } ?? "등락률 없음",
+                    "arrow.up.right"
+                )
+                overviewMetric(
+                    "약한 섹터",
+                    weakestSector?.sector.title ?? "-",
+                    weakestSector.flatMap { changeText($0.averageChange) } ?? "등락률 없음",
+                    "arrow.down.right"
+                )
+                overviewMetric(
+                    "상승 종목",
+                    "\(rows.filter { ($0.changePercent ?? 0) > 0 }.count)개",
+                    "하락 \(rows.filter { ($0.changePercent ?? 0) < 0 }.count)개",
+                    "chart.bar.xaxis"
+                )
+                overviewMetric(
+                    "데이터",
+                    "\(rows.filter { $0.changePercent != nil }.count)개",
+                    "등락률 포함",
+                    "checkmark.seal"
+                )
+            }
+
+            SectorStrip(summaries: summaries, selectedSector: $selectedSector)
+
+            SectorHeatmapPanel(
+                rows: filteredRows,
+                selectedSector: selectedSector,
+                onSelect: onSelect
+            )
+
+            Text("빨강은 상승, 파랑은 하락입니다. 섹터 평균은 등락률이 있는 종목을 거래대금으로 가중해 계산합니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func overviewMetric(_ title: String, _ value: String, _ caption: String, _ icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.blue)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func changeText(_ value: Double?) -> String {
+        guard let value else {
+            return "등락률 없음"
+        }
+        return "\(value >= 0 ? "+" : "")\(formattedDouble(value, fractionDigits: 2))%"
+    }
+}
+
+private struct SectorStrip: View {
+    let summaries: [SectorSummary]
+    @Binding var selectedSector: MarketSector
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                sectorButton(
+                    sector: .all,
+                    change: allAverageChange,
+                    count: summaries.reduce(0) { $0 + $1.rows.count }
+                )
+                ForEach(summaries) { summary in
+                    sectorButton(
+                        sector: summary.sector,
+                        change: summary.averageChange,
+                        count: summary.rows.count
+                    )
+                }
+            }
+        }
+    }
+
+    private var allAverageChange: Double? {
+        let values = summaries.compactMap(\.averageChange)
+        guard !values.isEmpty else {
+            return nil
+        }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private func sectorButton(sector: MarketSector, change: Double?, count: Int) -> some View {
+        Button {
+            selectedSector = sector
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: sector.systemImage)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(sector.title)
+                        .font(.caption.weight(.semibold))
+                    Text("\(count)개 · \(changeLabel(change))")
+                        .font(.caption2.monospacedDigit())
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .foregroundStyle(selectedSector == sector ? .white : .primary)
+            .background(selectedSector == sector ? sectorColor(change).opacity(0.82) : Color.secondary.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func changeLabel(_ change: Double?) -> String {
+        guard let change else {
+            return "-"
+        }
+        return "\(change >= 0 ? "+" : "")\(formattedDouble(change, fractionDigits: 1))%"
+    }
+}
+
+private struct SectorHeatmapPanel: View {
+    let rows: [MarketActivitySnapshot]
+    let selectedSector: MarketSector
+    let onSelect: (String) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 150), spacing: 10)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("\(selectedSector.title) 히트맵", systemImage: "square.grid.3x3.fill")
+                    .font(.headline)
+                Spacer()
+                Text("\(rows.count)개")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if rows.isEmpty {
+                ContentUnavailableView("표시할 섹터 데이터가 없습니다", systemImage: "square.grid.3x3")
+                    .frame(maxWidth: .infinity, minHeight: 260)
+            } else {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(rows, id: \.id) { row in
+                        SectorHeatmapTile(row: row)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onSelect(row.symbol)
+                            }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct SectorHeatmapTile: View {
+    let row: MarketActivitySnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.name)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Text(row.symbol)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.white.opacity(0.78))
+                }
+                Spacer()
+                Image(systemName: sector.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+
+            Spacer(minLength: 4)
+
+            HStack(alignment: .bottom) {
+                Text(changeLabel)
+                    .font(.title3.monospacedDigit().weight(.bold))
+                Spacer()
+                Text(tradeValueText)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(12)
+        .frame(height: 112)
+        .background(tileColor, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var sector: MarketSector {
+        marketSector(for: row)
+    }
+
+    private var tileColor: Color {
+        let base = sectorColor(row.changePercent)
+        let intensity = min(0.95, max(0.32, abs(row.changePercent ?? 0) / 6 + 0.32))
+        return base.opacity(intensity)
+    }
+
+    private var changeLabel: String {
+        guard let change = row.changePercent else {
+            return "-"
+        }
+        return "\(change >= 0 ? "+" : "")\(formattedDouble(change, fractionDigits: 2))%"
+    }
+
+    private var tradeValueText: String {
+        row.tradeValue.map { compactDecimal($0, fractionDigits: 1) } ?? "-"
+    }
+}
+
+private func sectorSummaries(from rows: [MarketActivitySnapshot]) -> [SectorSummary] {
+    let grouped = Dictionary(grouping: rows) { row in
+        marketSector(for: row)
+    }
+    return MarketSector.allCases
+        .filter { $0 != .all }
+        .compactMap { sector in
+            guard let sectorRows = grouped[sector], !sectorRows.isEmpty else {
+                return nil
+            }
+            let weightedRows = sectorRows.compactMap { row -> (change: Double, weight: Double)? in
+                guard let change = row.changePercent else {
+                    return nil
+                }
+                let weight = max(1, NSDecimalNumber(decimal: row.tradeValue ?? 1).doubleValue)
+                return (change, weight)
+            }
+            let average: Double?
+            if weightedRows.isEmpty {
+                average = nil
+            } else {
+                let totalWeight = weightedRows.reduce(0) { $0 + $1.weight }
+                average = weightedRows.reduce(0) { $0 + $1.change * $1.weight } / totalWeight
+            }
+            let totalTradeValue = sectorRows.reduce(Decimal(0)) { $0 + ($1.tradeValue ?? 0) }
+            return SectorSummary(
+                sector: sector,
+                rows: sectorRows.sorted { ($0.tradeValue ?? 0) > ($1.tradeValue ?? 0) },
+                averageChange: average,
+                totalTradeValue: totalTradeValue
+            )
+        }
+        .sorted { left, right in
+            if left.averageChange == nil, right.averageChange != nil {
+                return false
+            }
+            if left.averageChange != nil, right.averageChange == nil {
+                return true
+            }
+            return (left.averageChange ?? -999) > (right.averageChange ?? -999)
+        }
+}
+
+private func marketSector(for row: MarketActivitySnapshot) -> MarketSector {
+    let symbol = row.symbol.uppercased()
+    let text = "\(row.name) \(row.englishName) \(row.market) \(symbol)".lowercased()
+
+    let semiconductorSymbols: Set<String> = ["005930", "000660", "009150", "042700", "011070", "NVDA", "AMD", "AVGO", "TSM", "INTC", "ASML"]
+    let batterySymbols: Set<String> = ["373220", "006400", "051910", "096770", "247540", "086520", "003670"]
+    let healthcareSymbols: Set<String> = ["068270", "207940", "000100", "128940", "196170", "HLB"]
+    let platformSymbols: Set<String> = ["035420", "035720", "AAPL", "MSFT", "GOOGL", "META", "AMZN", "NFLX", "PLTR"]
+    let autoSymbols: Set<String> = ["005380", "000270", "TSLA", "GM", "F"]
+    let financeSymbols: Set<String> = ["055550", "105560", "086790", "JPM", "BAC", "C", "WFC", "MA", "V"]
+    let steelSymbols: Set<String> = ["005490", "010130", "004020", "POSCO"]
+    let energySymbols: Set<String> = ["010120", "066570", "034020", "009540", "267250", "XOM", "CVX"]
+    let aerospaceSymbols: Set<String> = ["RKLB", "LUNR", "LMT", "BA", "012450"]
+    let etfSymbols: Set<String> = ["SPY", "QQQ", "DIA", "IWM", "VOO"]
+
+    if semiconductorSymbols.contains(symbol) || text.contains("반도체") || text.contains("semiconductor") || text.contains("hynix") {
+        return .semiconductor
+    }
+    if batterySymbols.contains(symbol) || text.contains("battery") || text.contains("sdi") || text.contains("energy solution") || text.contains("2차전지") || text.contains("에너지솔루션") {
+        return .battery
+    }
+    if healthcareSymbols.contains(symbol) || text.contains("셀트리온") || text.contains("bio") || text.contains("pharma") || text.contains("health") || text.contains("medical") {
+        return .healthcare
+    }
+    if platformSymbols.contains(symbol) || text.contains("naver") || text.contains("kakao") || text.contains("platform") || text.contains("software") {
+        return .internetPlatform
+    }
+    if autoSymbols.contains(symbol) || text.contains("현대차") || text.contains("기아") || text.contains("motor") || text.contains("tesla") {
+        return .auto
+    }
+    if financeSymbols.contains(symbol) || text.contains("bank") || text.contains("금융") || text.contains("증권") || text.contains("card") {
+        return .finance
+    }
+    if steelSymbols.contains(symbol) || text.contains("posco") || text.contains("steel") || text.contains("철강") || text.contains("소재") {
+        return .steelMaterials
+    }
+    if energySymbols.contains(symbol) || text.contains("electric") || text.contains("에너지") || text.contains("조선") || text.contains("industrial") {
+        return .energyIndustrial
+    }
+    if aerospaceSymbols.contains(symbol) || text.contains("rocket") || text.contains("space") || text.contains("lockheed") || text.contains("방산") || text.contains("우주") {
+        return .aerospaceDefense
+    }
+    if etfSymbols.contains(symbol) || text.contains("etf") || text.contains("index") {
+        return .etfIndex
+    }
+    if text.contains("consumer") || text.contains("retail") || text.contains("walmart") {
+        return .consumer
+    }
+    return .other
+}
+
+private func sectorColor(_ change: Double?) -> Color {
+    guard let change else {
+        return .secondary
+    }
+    if change > 0 {
+        return .red
+    }
+    if change < 0 {
+        return .blue
+    }
+    return .secondary
 }
 
 struct MarketDataSourceNotice: View {
@@ -1411,7 +1836,7 @@ struct MarketRankingPanel: View {
                 ContentUnavailableView("표시할 종목이 없습니다", systemImage: "chart.bar")
                     .frame(maxWidth: .infinity, minHeight: 220)
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     MarketRankingHeader(metric: metric)
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         MarketRankingRow(rank: index + 1, row: row, metric: metric)
@@ -1440,6 +1865,7 @@ struct MarketRankingHeader: View {
             headerText("종목", minWidth: 180, alignment: .leading)
             headerText("시장", width: 96, alignment: .leading)
             headerText("현재가", width: 118, alignment: .trailing)
+            headerText("등락", width: 84, alignment: .trailing)
             headerText(metric == .tradingVolume ? "거래량" : "거래대금", width: 150, alignment: .trailing)
             headerText(metric == .tradingVolume ? "거래대금" : "거래량", width: 150, alignment: .trailing)
             headerText("체결", width: 72, alignment: .trailing)
@@ -1499,6 +1925,11 @@ struct MarketRankingRow: View {
                 .font(.callout.monospacedDigit())
                 .frame(width: 118, alignment: .trailing)
 
+            Text(changeText)
+                .font(.callout.monospacedDigit().weight(.semibold))
+                .foregroundStyle(sectorColor(row.changePercent))
+                .frame(width: 84, alignment: .trailing)
+
             metricValue(primary: true)
                 .frame(width: 150, alignment: .trailing)
 
@@ -1538,6 +1969,13 @@ struct MarketRankingRow: View {
             return "-"
         }
         return compactDecimal(value, fractionDigits: 1)
+    }
+
+    private var changeText: String {
+        guard let change = row.changePercent else {
+            return "-"
+        }
+        return "\(change >= 0 ? "+" : "")\(formattedDouble(change, fractionDigits: 2))%"
     }
 }
 

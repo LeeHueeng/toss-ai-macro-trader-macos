@@ -88,6 +88,40 @@ enum MockData {
             "AMD": "158.74",
             "SPY": "548.02"
         ]
+        let changePercents: [String: Double] = [
+            "005930": 3.41,
+            "000660": 0.84,
+            "035420": -1.18,
+            "009150": 2.22,
+            "035720": -0.92,
+            "005380": -0.41,
+            "000270": -0.65,
+            "402340": 3.48,
+            "042700": 4.12,
+            "011070": 1.74,
+            "010120": 2.08,
+            "066570": -0.35,
+            "068270": 1.32,
+            "373220": -2.18,
+            "005490": -1.04,
+            "006400": -1.74,
+            "AAPL": 0.58,
+            "MSFT": 0.24,
+            "NVDA": 2.15,
+            "TSLA": -1.42,
+            "GOOGL": -0.31,
+            "AMZN": 0.82,
+            "META": 1.08,
+            "NFLX": -0.77,
+            "AMD": 1.94,
+            "AVGO": 1.36,
+            "TSM": 0.91,
+            "PLTR": 2.44,
+            "RKLB": -2.08,
+            "LUNR": -3.36,
+            "LMT": 0.43,
+            "SPY": 0.35
+        ]
 
         return stockDirectory.enumerated().map { index, item in
             let price = lastPrices[item.symbol] ?? (item.currency == "KRW" ? "50000" : "100.00")
@@ -107,7 +141,9 @@ enum MockData {
                 tradeVolume: volume,
                 tradeValue: tradeValue,
                 tradeSampleCount: 50,
-                updatedAt: Date()
+                updatedAt: Date(),
+                priceChange: nil,
+                changePercent: changePercents[item.symbol]
             )
         }
     }
