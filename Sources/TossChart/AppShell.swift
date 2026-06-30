@@ -1280,7 +1280,7 @@ struct MarketView: View {
     @State private var selectedSector: MarketSector = .all
 
     private var rankedActivities: [MarketActivitySnapshot] {
-        session.marketActivities
+        let sorted = session.marketActivities
             .filter { $0.matches(scope: selectedScope) }
             .sorted { left, right in
                 switch selectedMetric {
@@ -1290,6 +1290,16 @@ struct MarketView: View {
                     return (left.tradeVolume ?? -1) > (right.tradeVolume ?? -1)
                 }
             }
+        let visibleLimit = selectedMode == .overview ? 650 : 350
+        var visible = Array(sorted.prefix(visibleLimit))
+        let anchorSymbols: Set<String> = [
+            "005930", "000660", "009150", "042700",
+            "373220", "051910", "006400", "086520", "247540", "450080", "003670", "066970", "361610"
+        ]
+        let visibleKeys = Set(visible.map { $0.symbol.uppercased() })
+        let anchors = sorted.filter { anchorSymbols.contains($0.symbol.uppercased()) && !visibleKeys.contains($0.symbol.uppercased()) }
+        visible.append(contentsOf: anchors)
+        return visible
     }
 
     var body: some View {
@@ -1596,7 +1606,7 @@ private struct SectorHeatmapGroup: View {
     let onSelect: (String) -> Void
 
     private var stockRows: [MarketActivitySnapshot] {
-        Array(summary.rows.prefix(isExpanded ? 44 : 18))
+        Array(summary.rows.prefix(isExpanded ? 36 : 12))
     }
 
     private var featuredRows: [MarketActivitySnapshot] {

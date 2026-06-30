@@ -101,6 +101,7 @@ final class AppSession: ObservableObject {
     private var automationMonitorTask: Task<Void, Never>?
     private var isAutomationScanRunning = false
     private var isMarketRefreshRunning = false
+    private var isMarketActivityRefreshRunning = false
     private var candleCacheKey: String?
     private var strategyCandleCache: [String: [Candle]] = [:]
     private var lastTossCLIRankingImportAt: Date?
@@ -778,6 +779,14 @@ final class AppSession: ObservableObject {
     }
 
     func refreshMarketActivity() async {
+        guard !isMarketActivityRefreshRunning else {
+            return
+        }
+        isMarketActivityRefreshRunning = true
+        defer {
+            isMarketActivityRefreshRunning = false
+        }
+
         let publicRankings = await fetchPublicDomesticRankings()
         let domesticRankings = publicRankings.rows
         let overseasRankings = await fetchPublicOverseasRankings()
@@ -805,12 +814,12 @@ final class AppSession: ObservableObject {
 
     private func fetchPublicDomesticRankings() async -> (source: PublicDomesticRankingSource, rows: [MarketActivitySnapshot]) {
         if let cache = publicDomesticRankingCache,
-           Date().timeIntervalSince(cache.updatedAt) < 60 {
+           Date().timeIntervalSince(cache.updatedAt) < 300 {
             return (cache.source, cache.rows)
         }
 
         do {
-            let rankings = try await naverRankingClient.tradeValueRanking(limit: 1_200)
+            let rankings = try await naverRankingClient.tradeValueRanking(limit: 700, maxPagesPerCategory: 4)
             if !rankings.isEmpty {
                 publicDomesticRankingCache = (Date(), .naver, rankings)
                 return (.naver, rankings)
@@ -835,7 +844,7 @@ final class AppSession: ObservableObject {
 
     private func fetchPublicOverseasRankings() async -> [MarketActivitySnapshot] {
         if let cache = publicOverseasRankingCache,
-           Date().timeIntervalSince(cache.updatedAt) < 120 {
+           Date().timeIntervalSince(cache.updatedAt) < 300 {
             return cache.rows
         }
 
@@ -914,7 +923,7 @@ final class AppSession: ObservableObject {
             case .naver:
                 parts = [
                     "시세 탭은 토스 API를 사용하지 않습니다.",
-                    "국내장은 네이버 모바일 공개 시세에서 KOSPI/KOSDAQ 전 종목을 페이징 조회한 뒤 거래대금순 상위 \(externalCount)개를 사용합니다.",
+                    "국내장은 네이버 모바일 공개 시세에서 KOSPI/KOSDAQ 주요 종목을 페이징 조회한 뒤 거래대금순 상위 \(externalCount)개를 사용합니다.",
                     "거래대금은 네이버 누적 거래대금 값을 원화로 환산합니다."
                 ]
             case .nextrade:

@@ -37,10 +37,10 @@ struct NaverMarketRankingClient {
     private let baseURL = URL(string: "https://m.stock.naver.com/api/stocks/marketValue")!
     private let decoder = JSONDecoder()
 
-    func tradeValueRanking(limit: Int = 150) async throws -> [MarketActivitySnapshot] {
+    func tradeValueRanking(limit: Int = 150, maxPagesPerCategory: Int? = nil) async throws -> [MarketActivitySnapshot] {
         var snapshots: [MarketActivitySnapshot] = []
         for category in ["KOSPI", "KOSDAQ"] {
-            snapshots.append(contentsOf: try await fetchCategory(category))
+            snapshots.append(contentsOf: try await fetchCategory(category, maxPages: maxPagesPerCategory))
         }
 
         return Array(
@@ -51,7 +51,7 @@ struct NaverMarketRankingClient {
         )
     }
 
-    private func fetchCategory(_ category: String) async throws -> [MarketActivitySnapshot] {
+    private func fetchCategory(_ category: String, maxPages: Int?) async throws -> [MarketActivitySnapshot] {
         let pageSize = 100
         var page = 1
         var totalCount: Int?
@@ -97,6 +97,9 @@ struct NaverMarketRankingClient {
                 break
             }
             if let totalCount, loadedCount >= totalCount {
+                break
+            }
+            if let maxPages, page >= maxPages {
                 break
             }
 
