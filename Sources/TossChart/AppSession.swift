@@ -90,6 +90,7 @@ final class AppSession: ObservableObject {
     @Published var lastAutomationDecision = "자동 감시 전"
 
     private let keychain = KeychainStore(service: "com.tosschart.credentials")
+    private let credentialsKeychainAccount = "tossAPI.credentials.v2"
     private let client = TossInvestClient()
     private let naverRankingClient = NaverMarketRankingClient()
     private let nextradeClient = NextradeMarketRankingClient()
@@ -364,13 +365,31 @@ final class AppSession: ObservableObject {
     }
 
     func loadCredentials() {
-        credentials.clientID = keychain.read(account: "clientID") ?? ""
-        credentials.clientSecret = keychain.read(account: "clientSecret") ?? ""
+        if let encoded = keychain.read(account: credentialsKeychainAccount),
+           let data = encoded.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(Credentials.self, from: data) {
+            credentials = decoded
+            return
+        }
+
+        let legacy = Credentials(
+            clientID: keychain.read(account: "clientID") ?? "",
+            clientSecret: keychain.read(account: "clientSecret") ?? ""
+        )
+        credentials = legacy
+        if legacy.isComplete {
+            try? saveCredentials()
+        }
     }
 
     func saveCredentials() throws {
-        try keychain.save(credentials.clientID, account: "clientID")
-        try keychain.save(credentials.clientSecret, account: "clientSecret")
+        let data = try JSONEncoder().encode(credentials)
+        guard let encoded = String(data: data, encoding: .utf8) else {
+            throw KeychainError.unhandledStatus(errSecParam)
+        }
+        try keychain.save(encoded, account: credentialsKeychainAccount)
+        keychain.delete(account: "clientID")
+        keychain.delete(account: "clientSecret")
         loadCredentials()
     }
 

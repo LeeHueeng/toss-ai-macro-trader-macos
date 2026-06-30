@@ -59,7 +59,7 @@ enum ConnectionState: Equatable {
     }
 }
 
-struct Credentials: Equatable {
+struct Credentials: Codable, Equatable {
     var clientID: String = ""
     var clientSecret: String = ""
 
